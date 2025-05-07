@@ -1,0 +1,78 @@
+﻿@page "/monitor"
+@inject NavigationManager navigationManager
+@rendermode InteractiveWebAssembly
+
+<h3>Monitor</h3>
+
+@if (isConnected)
+{
+    <h3>สถานะเครื่องพิมพ์แต่ละสาขา</h3>
+
+    @foreach (var branch in printerStatus)
+    {
+        <div class="mb-2">
+            <button class="btn btn-outline-primary" @onclick="@(() => ToggleBranch(branch.Key))">
+                @(branchToggles.TryGetValue(branch.Key, out var isOpen) && isOpen ? "🔽" : "▶️") สาขา: @branch.Key
+            </button>
+
+            @if (branchToggles.TryGetValue(branch.Key, out var isVisible) && isVisible)
+            {
+                <ul class="mt-2">
+                    @foreach (var printer in branch.Value)
+                    {
+                        <li><strong>@printer.Key</strong>: @printer.Value</li>
+                    }
+                </ul>
+            }
+        </div>
+    }
+}
+else
+{
+    <p>Connecting...</p>
+}
+
+@code {
+    private HubConnection? hubConnection;
+    private Dictionary<string, Dictionary<string, string>> printerStatus = new();
+    private Dictionary<string, bool> branchToggles = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        hubConnection = new HubConnectionBuilder()
+            .WithUrl(navigationManager.ToAbsoluteUri("/monitorhub"))
+            .WithAutomaticReconnect()
+            .Build();
+
+        hubConnection.On<string, Dictionary<string, string>>("AllPrinterStatus", (branch, printers) =>
+        {
+            InvokeAsync(() =>
+            {
+                printerStatus[branch] = printers;
+
+                // ตั้งค่า toggle default ถ้ายังไม่มี
+                if (!branchToggles.ContainsKey(branch))
+                {
+                    branchToggles[branch] = false;
+                }
+
+                StateHasChanged();
+            });
+        });
+
+        await hubConnection.StartAsync();
+
+        await hubConnection.InvokeAsync("RequestAllPrinters", "ประเวศ");
+        await hubConnection.InvokeAsync("RequestAllPrinters", "สาทร");
+    }
+
+    private void ToggleBranch(string branch)
+    {
+        if (branchToggles.ContainsKey(branch))
+            branchToggles[branch] = !branchToggles[branch];
+        else
+            branchToggles[branch] = true;
+    }
+
+    public bool isConnected => hubConnection?.State == HubConnectionState.Connected;
+}
